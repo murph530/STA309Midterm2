@@ -1,0 +1,314 @@
+---
+title: "STA309 Midterm2"
+author: "Aidan Murphy"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(tidytext)
+library(textdata)
+library(maps)
+library(ggthemes)
+library(patchwork)
+library(gridExtra)
+library(ggwordcloud)
+```
+
+
+```{r}
+eng_gen <- read_csv("https://ourworldindata.org/grapher/renewable-electricity-per-capita.csv")
+eng_used <- read_csv("https://ourworldindata.org/grapher/per-capita-energy-use.csv")
+shares  <- read_csv("https://ourworldindata.org/grapher/share-electricity-renewables.csv")
+
+eng_gen <- eng_gen %>% rename(renew_pc = 4)
+eng_used <- eng_used %>% rename(energy_pc = 4)
+shares <- shares %>% rename(renew_share = 4)
+
+energy <- eng_gen %>%
+  left_join(eng_used, by = c("Entity","Code","Year")) %>%
+  left_join(shares, by = c("Entity","Code","Year"))
+
+energy_2023 <- energy %>%
+  filter(Year==2023)
+```
+
+```{r}
+world_map <- map_data("world")
+
+energy_2023 <- energy_2023 %>%
+  mutate( 
+         Entity = recode(Entity,
+    "United States" = "USA",
+    "United Kingdom" = "UK",
+    "Democratic Republic of Congo" = "Democratic Republic of the Congo",
+    "Congo" = "Republic of Congo",
+    .default = Entity
+  ),region=Entity)
+
+map_data <- world_map %>%
+  left_join(energy_2023, by = "region")
+```
+
+```{r}
+eng_gen_pc_plot <- ggplot()+
+  geom_polygon(data=map_data, aes(x=long, y=lat, group=group, fill=renew_pc))+
+  geom_path(data=map_data, aes(x=long, y=lat, group=group), size=.2)+
+  labs(
+    title="Renewable Energy Generated Per Capita",
+    x="Longitude",
+    y="Latitude",
+    fill="kWh per person"
+  )+
+  scale_fill_viridis_c()+
+  theme_minimal()
+eng_gen_pc_plot
+```
+
+
+```{r}
+eng_use_pc_plot <- ggplot()+
+  geom_polygon(data=map_data, aes(x=long, y=lat, group=group, fill=energy_pc))+
+  geom_path(data=map_data, aes(x=long, y=lat, group=group), size=.2)+
+  labs(
+    title="Energy Used Per Capita",
+    x="Longitude",
+    y="Latitude",
+    fill="kWh per person"
+  )+
+  scale_fill_viridis_c()+
+  theme_minimal()
+
+eng_use_pc_plot
+```
+
+
+```{r}
+ts_energy <- energy %>%
+  filter(Year >= 2000, Year<=2023)
+
+global_avg <- ts_energy %>%
+  group_by(Year) %>%
+  summarise(avg_renew = mean(renew_pc, na.rm = TRUE))
+
+time_series <- ggplot() +
+  annotate("text", x=2015, y=50000, label="Iceland leads the world in renewable energy", size=2.5)+
+  geom_line(data=ts_energy, aes(x = Year, y = renew_pc, group=Entity), color="grey", alpha=.5)+
+  geom_line(data=ts_energy %>% 
+              filter(Entity %in% c("United States", "China", "Iceland", "Norway", "Bhutan")), 
+            aes(x=Year, y=renew_pc, color=Entity), size=1)+
+  geom_line(data = global_avg, aes(x = Year, y = avg_renew), 
+             linetype = "dashed", color = "black", alpha=.7) +
+  annotate("text", x=2015, y=6000, label="China and the US are very similar in renewable 
+energy production and are close to the global average", size=2.5)+
+  labs(
+    title="Renewable Energy Trends (2000-2023)",
+    subtitle="Grey lines represent global trends. Dashed line represents global average",
+    x="Year",
+    y="Renewable Energy Generated (kWh per person)"
+  )+
+  theme_minimal()
+
+time_series  
+```
+
+```{r}
+top5_renew <- energy_2023 %>%
+  slice_max(renew_pc, n = 5) %>%
+  select(Entity, renew_pc, energy_pc)
+top5_energy <- energy_2023 %>%
+  slice_max(energy_pc, n = 5) %>%
+  select(Entity, renew_pc, energy_pc)
+
+
+scatterplot <- ggplot(energy_2023, aes(x = energy_pc, y = renew_pc)) +
+  annotate("rect", xmin=125000, xmax=220000, ymin=-1000, ymax=15000, alpha=.3, color="grey")+
+  annotate("text", x=172000, y=10000, label="Countries with a strong reliance on oil 
+generate almost no renewable energy", size=2.5)+
+  annotate("text", x=35000, y=20000, label="Bhutan surprisingly generates the 
+3rd most renewable energy per capita", size=2.5)+
+  annotate("text", x=160000, y=48000, label="Iceland continues to dominate renewable 
+energy even with higher energy usage per person", size=2.5)+
+  annotate("text", x=152000, y=0, label="Bahrain", size=2.7)+
+  annotate("text", x=187000, y=1000, label="Singapore", size=2.7)+
+  geom_point(alpha = 0.7) +
+  geom_point(data=top5_renew, aes(x=energy_pc, y=renew_pc), size=2, color="darkcyan")+
+  geom_point(data=top5_energy, aes(x=energy_pc, y=renew_pc), size=2, color="red")+
+  geom_point(data=top5_renew%>% filter(Entity=="Iceland"), aes(x=energy_pc, y=renew_pc), size=2, color="green")+
+  geom_text(data = top5_renew, aes(label = Entity), vjust =-.5, size=3)+
+  geom_text(data = top5_energy%>%filter(!Entity %in% c("Bahrain", "Singapore")), aes(label = Entity), vjust =-.5, size=3)+
+  labs(
+    title = "Renewables vs Total Energy Use",
+    x = "Energy Use (kWh per person)",
+    y = "Renewable Electricity Generated (kWh per person)"
+  )+
+  theme_minimal()
+
+scatterplot
+```
+
+
+
+```{r}
+eng_share_leaders <- ggplot(ts_energy %>% filter(Entity %in% c("Norway","Iceland","Brazil","Germany", "United States", "China"))) +
+  aes(x = Year, y = renew_share, color = Entity) +
+  geom_line(size=1) +
+  labs(
+    title = "Share of Electricity from Renewables",
+    x="Year",
+    y = "Percent"
+  )+
+  theme_minimal()
+
+eng_share_leaders
+```
+
+
+```{r}
+eng_dashboard <- (eng_gen_pc_plot+eng_use_pc_plot)/ (time_series+scatterplot)/(eng_share_leaders)+
+  plot_layout(heights=c(3,3,4))
+
+eng_dashboard
+```
+
+```{r}
+
+ggsave(
+  "dashboard.png",
+  dashboard,
+  width = 14,
+  height = 10,
+  dpi = 300
+)
+```
+
+
+**Problem 2**
+
+```{r}
+lyrics <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-29/taylor_swift_lyrics.csv")
+charts <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-29/charts.csv")
+sales <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-29/sales.csv")
+```
+```{r}
+lyrics_sub <- lyrics %>%
+  filter(Album %in% c("1989", "Fearless"))
+
+tidy_lyrics <- lyrics_sub %>%
+  unnest_tokens(word, Lyrics) %>%
+  anti_join(stop_words)
+
+pop_words <- tidy_lyrics %>%
+  group_by(Album, word)%>%
+  summarize(N=n())%>%
+  arrange(desc(N))%>%
+  slice(1:100)
+
+
+word_clouds<- ggplot(pop_words, aes(label=word, size=N, color=Album)) +
+  geom_text_wordcloud() +
+  scale_size_area(max_size=12) +
+  theme_minimal() +
+  facet_wrap(Album~., ncol = 1)
+word_clouds
+```
+
+```{r}
+bing <- get_sentiments("bing")
+
+sentiment_data <- tidy_lyrics %>%
+  inner_join(bing) %>%
+  count(Album, sentiment)
+
+ggplot(sentiment_data, aes(x = Album, y = n, fill = sentiment)) +
+  geom_col(position = "dodge") +
+  labs(title = "Sentiment Comparison: 1989 vs Fearless",
+       y = "Word Count")
+```
+
+```{r}
+song_sentiment <- tidy_lyrics %>%
+  inner_join(bing) %>%
+  count(Title, Album, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(avg_sentiment = (positive - negative) / (positive + negative))
+
+album_sentiment <- song_sentiment %>%
+  group_by(Album) %>%
+  summarize(album_avg_sentiment = mean(avg_sentiment))
+
+charts_global <- charts %>%
+  rename(Album = title, peak = chart_position) %>%
+  group_by(Album) %>%
+  summarize(avg_global_peak = mean(peak))
+
+sales_global <- sales %>%
+  rename(Album = title) %>%
+  group_by(Album) %>%
+  summarize(global_sales = sum(sales, na.rm = TRUE))
+
+combined_album <- album_sentiment %>%
+  left_join(charts_global, by = "Album")%>%
+  left_join(sales_global, by = "Album")
+```
+
+```{r}
+songs <- ggplot(song_sentiment, aes(x = Album, y = avg_sentiment)) +
+  geom_point()+
+  geom_text(data = song_sentiment %>% filter((avg_sentiment > 0.6 | avg_sentiment < -0.6)& (Title!="How You Get The Girl")),
+    aes(label = Title), hjust = -0.1,size = 3) +
+  labs(title = "Distribution of Song Sentiment by Album",
+       y = "Sentiment Score")+
+  theme_minimal()
+
+songs
+```
+
+```{r}
+boxplot <- ggplot(song_sentiment, aes(x = Album, y = avg_sentiment)) +
+  geom_boxplot(fill = "lightblue", alpha = 0.7) +
+  labs(title = "Distribution of Song Sentiment by Album",
+       y = "Sentiment Score")+
+  theme_minimal()
+boxplot
+```
+
+
+```{r}
+sales_graph <- ggplot(combined_album, aes(x = Album, y = global_sales/1e6, fill = Album)) +
+  geom_col() +
+  geom_text(aes(label = round(global_sales/1000000,1)), vjust = -0.5) +
+  labs(title = "Global Sales by Album",
+       y = "Sales (millions)") +
+  theme_minimal()
+sales_graph
+```
+
+```{r}
+sent_graph <- ggplot(combined_album, aes(x = Album, y = album_avg_sentiment, fill = Album)) +
+  geom_col() +
+  geom_text(aes(label=round(album_avg_sentiment,3)),vjust=1)+
+  labs(title = "Average Sentiment by Album",
+       subtitle="Lower sentiment score indicates more negative words",
+       y = "Sentiment") +
+  theme_minimal()
+
+sent_graph
+```
+
+```{r}
+swift_dashboard <- word_clouds/ (songs+boxplot)/(sales_graph+sent_graph)+
+  plot_layout(heights=c(3,3,4))
+
+swift_dashboard
+```
+```{r}
+ggsave(
+  "swift_dashboard.png",
+  swift_dashboard,
+  width = 14,
+  height = 10,
+  dpi = 200
+)
+```
+
